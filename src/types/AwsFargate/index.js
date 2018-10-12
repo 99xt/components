@@ -1,4 +1,4 @@
-import { pick } from 'ramda'
+const { pick } = require('ramda')
 const aws = require('aws-sdk')
 const ec2 = new aws.EC2({ region: process.env.AWS_DEFAULT_REGION || 'us-east-1' })
 const ecs = new aws.ECS({ region: process.env.AWS_DEFAULT_REGION || 'us-east-1' })
@@ -28,26 +28,33 @@ async function waitUntilTaskChangeFinishes(taskArns, currentTry, limit) {
   return tasks
 }
 
-export default {
+module.exports = {
+  construct(inputs) {
+    Object.define(this, inputs)
+  },
+
+  async define(context) {
+    const input = pick(inputsProps, this)
+    const taskDefinitionComponent = await context.loadType('AwsEcsTaskDefinition')
+    const td = await context.construct(taskDefinitionComponent, {
+      family: `${input.serviceName}-family`,
+      volumes: [],
+      containerDefinitions: input.containerDefinitions,
+      networkMode: 'awsvpc',
+      requiresCompatibilities: ['FARGATE'],
+      cpu: input.cpu,
+      memory: input.memory
+    })
+
+    this.td = td
+    return { td }
+  },
+
   async deploy(prevInstance, context) {
     const input = pick(inputsProps, this)
     let state = context.getState(this)
 
-    const taskDefinitionComponent = await context.load(
-      'aws-ecs-task-definition',
-      'taskDefinition',
-      {
-        family: `${input.serviceName}-family`,
-        volumes: [],
-        containerDefinitions: input.containerDefinitions,
-        networkMode: 'awsvpc',
-        requiresCompatibilities: ['FARGATE'],
-        cpu: input.cpu,
-        memory: input.memory
-      }
-    )
-    const taskDefinitionOutputs = await taskDefinitionComponent.deploy()
-    state = { ...state, taskDefinition: taskDefinitionOutputs }
+    state = { ...state, taskDefinition: this.td }
     context.saveState(this, state)
 
     let securityGroups = []
@@ -191,10 +198,11 @@ export default {
       subnets = [state.SubnetId]
     }
 
-    const serviceComponent = await context.load('aws-ecs-service', 'service', {
+    const serviceComponent = await context.load('AwsEcsService')
+    const service = await context.construct(serviceComponent, {
       launchType: 'FARGATE',
       desiredCount: input.desiredCount,
-      taskDefinition: `${taskDefinitionOutputs.family}:${taskDefinitionOutputs.revision}`,
+      taskDefinition: `${this.td.family}:${this.td.revision}`,
       serviceName: input.serviceName,
       networkConfiguration: {
         awsvpcConfiguration: {
@@ -205,7 +213,7 @@ export default {
       }
     })
 
-    const serviceComponentOutputs = await serviceComponent.deploy()
+    const serviceComponentOutputs = await service.deploy()
     state = { ...state, service: serviceComponentOutputs }
     context.saveState(this, state)
 
