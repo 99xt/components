@@ -1,9 +1,7 @@
 name: AwsEcsTaskDefinition
 extends: Component
-
-version: 0.3.0
-core: 0.3.x
 main: ./index.js
+version: 1.0.0
 
 description: "Provision AWS ECS TaskDefinition with Serverless Components"
 license: Apache-2.0

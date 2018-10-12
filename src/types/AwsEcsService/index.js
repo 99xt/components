@@ -19,6 +19,10 @@ const inputsProps = [
 ]
 
 export default {
+  construct(inputs) {
+    Object.assign(this, inputs)
+  },
+
   async deploy(prevInstance, context) {
     const AWS = new this.provider.getSdk()
     const ecs = AWS.ECS()
@@ -38,9 +42,9 @@ export default {
     const { taskDefinition: taskDefinitionOriginal, launchType, ...params } = inputs
 
     const taskDefinition =
-      typeof taskDefinitionOriginal === 'object'
-        ? `${taskDefinitionOriginal.family}:${taskDefinitionOriginal.revision}`
-        : taskDefinitionOriginal
+      typeof taskDefinitionOriginal === 'string'
+        ? taskDefinitionOriginal
+        : `${taskDefinitionOriginal.family}:${taskDefinitionOriginal.revision}`
 
     const { service } = await (existingService && existingService.status === 'ACTIVE'
       ? ecs.updateService({ ...params, service: serviceName, taskDefinition }).promise()

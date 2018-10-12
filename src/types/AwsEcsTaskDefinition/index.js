@@ -15,6 +15,10 @@ const inputsProps = [
 ]
 
 export default {
+  construct(inputs) {
+    Object.assign(this, inputs)
+  },
+
   async deploy(prevInstance, context) {
     const inputs = pick(inputsProps, this)
     const state = context.getState(this)
@@ -69,7 +73,7 @@ export default {
     })
   },
 
-  async get(prevInstance, context) {
+  async getTodo(prevInstance, context) {
     const AWS = new this.provider.getSdk()
     const ecs = AWS.ECS()
     const state = context.getState(this)

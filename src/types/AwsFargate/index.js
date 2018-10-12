@@ -1,6 +1,7 @@
 const { pick } = require('ramda')
 
 const inputsProps = [
+  'provider',
   'serviceName',
   'cluster',
   'cpu',
@@ -32,11 +33,15 @@ async function waitUntilTaskChangeFinishes(ecs, taskArns, currentTry, limit) {
 
 module.exports = {
   construct(inputs) {
-    Object.define(this, inputs)
+    Object.assign(this, inputs)
   },
 
   async define(context) {
     const input = pick(inputsProps, this)
+    const provider = input.provider.get()
+    const aws = provider.getSdk()
+    let state = context.getState(this)
+    const ec2 = new aws.EC2({ region: 'us-east-1' })
     const taskDefinitionComponent = await context.loadType('AwsEcsTaskDefinition')
     const td = await context.construct(taskDefinitionComponent, {
       family: `${input.serviceName}-family`,
@@ -47,20 +52,6 @@ module.exports = {
       cpu: input.cpu,
       memory: input.memory
     })
-
-    this.td = td
-    return { td }
-  },
-
-  async deploy(prevInstance, context) {
-    const input = pick(inputsProps, this)
-    let state = context.getState(this)
-    const aws = this.provider.getSdk()
-    const ec2 = new aws.EC2()
-    const ecs = new aws.EC2()
-
-    state = { ...state, taskDefinition: this.td }
-    context.saveState(this, state)
 
     let securityGroups = []
     let subnets = []
@@ -203,11 +194,10 @@ module.exports = {
       subnets = [state.SubnetId]
     }
 
-    const serviceComponent = await context.load('AwsEcsService')
-    const service = await context.construct(serviceComponent, {
+    const serviceParams = {
       launchType: 'FARGATE',
       desiredCount: input.desiredCount,
-      taskDefinition: `${this.td.family}:${this.td.revision}`,
+      taskDefinition: `${td.family}:${td.revision}`,
       serviceName: input.serviceName,
       networkConfiguration: {
         awsvpcConfiguration: {
@@ -216,17 +206,29 @@ module.exports = {
           subnets: subnets
         }
       }
-    })
+    }
+    if (typeof input.cluster === 'string' && input.cluster.length) {
+      Object.assign(serviceParams, { cluster: input.cluster })
+    }
+    const serviceComponent = await context.loadType('AwsEcsService')
+    const service = await context.construct(serviceComponent, serviceParams)
 
-    const serviceComponentOutputs = await service.deploy()
-    state = { ...state, service: serviceComponentOutputs }
-    context.saveState(this, state)
+    this.service = service
+
+    return { service }
+  },
+
+  async deploy(prevInstance, context) {
+    const input = pick(inputsProps, this)
+    const provider = input.provider.get()
+    const aws = provider.getSdk()
+    let state = context.getState(this)
+    const ec2 = new aws.EC2()
+    const ecs = new aws.EC2()
 
     context.log('Tasks: waiting for provisioning to finish')
     await new Promise((resolve) => setTimeout(() => resolve(), 15000))
-    const { taskArns } = await ecs
-      .listTasks({ serviceName: serviceComponentOutputs.serviceName })
-      .promise()
+    const { taskArns } = await ecs.listTasks({ serviceName: this.service.serviceName }).promise()
     const tasks = await waitUntilTaskChangeFinishes(ecs, taskArns, 0, 10).catch((res) => res)
     context.log('Tasks: provision complete')
     let containers = []
@@ -259,8 +261,8 @@ module.exports = {
     context.log('AWS Fargate: deployment complete')
 
     return Object.assign(this, {
-      serviceArn: serviceComponentOutputs.serviceArn,
-      serviceName: serviceComponentOutputs.serviceName,
+      serviceArn: this.service.serviceArn,
+      serviceName: this.service.serviceName,
       containers,
       attachments,
       networkInterfaces
@@ -268,33 +270,14 @@ module.exports = {
   },
 
   async remove(prevInstance, context) {
-    const aws = this.provider.getSdk()
+    const input = pick(inputsProps, this)
+    const provider = input.provider.get()
+    const aws = provider.getSdk()
     const ec2 = new aws.EC2()
     const ecs = new aws.EC2()
-    const input = pick(inputsProps, this)
     let state = context.getState(this)
 
     const { taskArns } = await ecs.listTasks({ serviceName: input.serviceName }).promise()
-
-    if (state.taskDefinition) {
-      const taskDefinitionComponent = await context.load(
-        'aws-ecs-task-definition',
-        'taskDefinition',
-        {
-          family: `${input.serviceName}-family`,
-          volumes: [],
-          containerDefinitions: input.containerDefinitions,
-          networkMode: 'awsvpc',
-          requiresCompatibilities: ['FARGATE'],
-          cpu: input.cpu,
-          memory: input.memory
-        }
-      )
-      await taskDefinitionComponent.remove({}, context.taskDefinition)
-
-      state = { ...state, taskDefinition: null }
-      context.saveState(this, state)
-    }
 
     if (state.service) {
       let serviceParams = {
@@ -424,11 +407,12 @@ module.exports = {
     })
   },
 
-  async get(prevInstance, context) {
-    const aws = this.provider.getSdk()
+  async getTodo(prevInstance, context) {
+    const input = pick(inputsProps, this)
+    const provider = input.provider.get()
+    const aws = provider.getSdk()
     const ec2 = new aws.EC2()
     const ecs = new aws.EC2()
-    const input = pick(inputsProps, this)
     let state = context.getState(this)
     context.log('Tasks: waiting for provisioning to finish')
     await new Promise((resolve) => setTimeout(() => resolve(), 40000))

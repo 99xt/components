@@ -1,6 +1,7 @@
-type: aws-ecs-service
-version: 0.2.0
-core: 0.2.x
+name: AwsEcsService
+extends: Component
+main: ./index.js
+version: 1.0.0
 
 description: "Provision AWS ECS Service with Serverless Components"
 license: Apache-2.0
