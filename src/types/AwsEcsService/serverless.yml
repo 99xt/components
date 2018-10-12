@@ -83,6 +83,7 @@ schedulingStrategy:
 inputTypes:
   provider:
     type: AwsProvider
+    required: true
   serviceName:
     type: string
     example: myAwsEcsService
