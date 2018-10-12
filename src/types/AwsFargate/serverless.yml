@@ -1,6 +1,7 @@
-type: aws-fargate
-version: 0.2.0
-core: 0.2.x
+name: AwsFargate
+extends: Component
+main: ./index.js
+version: 1.0.0
 
 description: "Provision AWS ECS Fargate Service with Serverless Components"
 license: Apache-2.0
