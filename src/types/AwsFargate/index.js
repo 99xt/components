@@ -1,7 +1,4 @@
 const { pick } = require('ramda')
-const aws = require('aws-sdk')
-const ec2 = new aws.EC2({ region: process.env.AWS_DEFAULT_REGION || 'us-east-1' })
-const ecs = new aws.ECS({ region: process.env.AWS_DEFAULT_REGION || 'us-east-1' })
 
 const inputsProps = [
   'serviceName',
@@ -14,7 +11,7 @@ const inputsProps = [
   'awsVpcConfiguration'
 ]
 
-async function waitUntilTaskChangeFinishes(taskArns, currentTry, limit) {
+async function waitUntilTaskChangeFinishes(ecs, taskArns, currentTry, limit) {
   const { tasks } = await ecs.describeTasks({ tasks: taskArns }).promise()
   if (currentTry > limit || !Array.isArray(tasks)) return Promise.reject(tasks)
 
@@ -22,7 +19,12 @@ async function waitUntilTaskChangeFinishes(taskArns, currentTry, limit) {
   if (unfinishedTasks.length) {
     // Wait 10 seconds because it times some times for tasks to change
     await new Promise((resolve) => setTimeout(() => resolve(), 10000))
-    return waitUntilTaskChangeFinishes(unfinishedTasks.map((t) => t.taskArn), currentTry++, limit)
+    return waitUntilTaskChangeFinishes(
+      ecs,
+      unfinishedTasks.map((t) => t.taskArn),
+      currentTry++,
+      limit
+    )
   }
 
   return tasks
@@ -53,6 +55,9 @@ module.exports = {
   async deploy(prevInstance, context) {
     const input = pick(inputsProps, this)
     let state = context.getState(this)
+    const aws = this.provider.getSdk()
+    const ec2 = new aws.EC2()
+    const ecs = new aws.EC2()
 
     state = { ...state, taskDefinition: this.td }
     context.saveState(this, state)
@@ -222,7 +227,7 @@ module.exports = {
     const { taskArns } = await ecs
       .listTasks({ serviceName: serviceComponentOutputs.serviceName })
       .promise()
-    const tasks = await waitUntilTaskChangeFinishes(taskArns, 0, 10).catch((res) => res)
+    const tasks = await waitUntilTaskChangeFinishes(ecs, taskArns, 0, 10).catch((res) => res)
     context.log('Tasks: provision complete')
     let containers = []
     let attachments = []
@@ -263,6 +268,9 @@ module.exports = {
   },
 
   async remove(prevInstance, context) {
+    const aws = this.provider.getSdk()
+    const ec2 = new aws.EC2()
+    const ecs = new aws.EC2()
     const input = pick(inputsProps, this)
     let state = context.getState(this)
 
@@ -308,7 +316,7 @@ module.exports = {
 
     if (Array.isArray(taskArns) && taskArns.length) {
       context.log('Task: waiting for removal to finish')
-      await waitUntilTaskChangeFinishes(taskArns, 0, 5)
+      await waitUntilTaskChangeFinishes(ecs, taskArns, 0, 5)
       context.log('Task: finished')
     }
 
@@ -417,12 +425,15 @@ module.exports = {
   },
 
   async get(prevInstance, context) {
+    const aws = this.provider.getSdk()
+    const ec2 = new aws.EC2()
+    const ecs = new aws.EC2()
     const input = pick(inputsProps, this)
     let state = context.getState(this)
     context.log('Tasks: waiting for provisioning to finish')
     await new Promise((resolve) => setTimeout(() => resolve(), 40000))
     const { taskArns } = await ecs.listTasks({ serviceName: input.serviceName }).promise()
-    const tasks = await waitUntilTaskChangeFinishes(taskArns, 0, 10).catch((res) => res)
+    const tasks = await waitUntilTaskChangeFinishes(ecs, taskArns, 0, 10).catch((res) => res)
     context.log('Tasks: provision complete')
     let containers = []
     let attachments = []
